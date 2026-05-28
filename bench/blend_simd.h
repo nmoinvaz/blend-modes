@@ -364,3 +364,58 @@ SIMD_WRAP(reflect_fast,)   SIMD_WRAP(harmonic_fast,) SIMD_WRAP(geometric_fast,) 
 static inline void add_simd_u4(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { add_scalar(A, B, D, n); }
 static inline void frank_poly_u(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { frank_scalar(A, B, D, n); }
 #endif
+
+// ---- across-the-board unrolling experiments ----
+#if defined(__ARM_NEON)
+
+// Tier-1 single-instruction ops unrolled 4x (64 bytes/iter) for memory-level parallelism
+#define SIMD_FN4(NAME, VEXPR, SCALARFN)                                                       \
+static inline void NAME(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) {           \
+    size_t i = 0, m = n & ~size_t(63);                                                        \
+    for (; i < m; i += 64) {                                                                  \
+        { uint8x16_t va = vld1q_u8(A+i),    vb = vld1q_u8(B+i);    vst1q_u8(D+i,    (VEXPR)); }\
+        { uint8x16_t va = vld1q_u8(A+i+16), vb = vld1q_u8(B+i+16); vst1q_u8(D+i+16, (VEXPR)); }\
+        { uint8x16_t va = vld1q_u8(A+i+32), vb = vld1q_u8(B+i+32); vst1q_u8(D+i+32, (VEXPR)); }\
+        { uint8x16_t va = vld1q_u8(A+i+48), vb = vld1q_u8(B+i+48); vst1q_u8(D+i+48, (VEXPR)); }\
+    }                                                                                         \
+    SCALARFN(A+i, B+i, D+i, n-i);                                                             \
+}
+SIMD_FN4(darken_u4, vminq_u8(va, vb),   darken_scalar)
+SIMD_FN4(xor_u4,    veorq_u8(va, vb),   xor_scalar)
+SIMD_FN4(diff_u4,   vabdq_u8(va, vb),   diff_scalar)
+SIMD_FN4(avg_u4,    vrhaddq_u8(va, vb), avg_scalar)
+
+// Tier-3 float, unrolled to 16 pixels/iter (4 independent OP chains; native div/sqrt)
+template <float32x4_t (*OP)(float32x4_t, float32x4_t)>
+static inline uint16x4_t op4(uint16x4_t ai, uint16x4_t bi) {
+    const float32x4_t inv = vdupq_n_f32(1.f / 255.f);
+    float32x4_t a = vmulq_f32(vcvtq_f32_u32(vmovl_u16(ai)), inv);
+    float32x4_t b = vmulq_f32(vcvtq_f32_u32(vmovl_u16(bi)), inv);
+    float32x4_t r = vminq_f32(vmaxq_f32(vmulq_f32(OP(a, b), vdupq_n_f32(255.f)), vdupq_n_f32(0.f)), vdupq_n_f32(255.f));
+    return vmovn_u32(vcvtnq_u32_f32(r));
+}
+template <float32x4_t (*OP)(float32x4_t, float32x4_t)>
+static inline void simd_f_u(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) {
+    size_t i = 0, m = n & ~size_t(15);
+    for (; i < m; i += 16) {
+        uint8x16_t va = vld1q_u8(A + i), vb = vld1q_u8(B + i);
+        uint16x8_t al = vmovl_u8(vget_low_u8(va)), ah = vmovl_u8(vget_high_u8(va));
+        uint16x8_t bl = vmovl_u8(vget_low_u8(vb)), bh = vmovl_u8(vget_high_u8(vb));
+        uint16x4_t r0 = op4<OP>(vget_low_u16(al),  vget_low_u16(bl));
+        uint16x4_t r1 = op4<OP>(vget_high_u16(al), vget_high_u16(bl));
+        uint16x4_t r2 = op4<OP>(vget_low_u16(ah),  vget_low_u16(bh));
+        uint16x4_t r3 = op4<OP>(vget_high_u16(ah), vget_high_u16(bh));
+        vst1q_u8(D + i, vcombine_u8(vmovn_u16(vcombine_u16(r0, r1)), vmovn_u16(vcombine_u16(r2, r3))));
+    }
+}
+#define SIMD_WRAP_U(NAME, OP) static inline void NAME(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { simd_f_u<OP>(A, B, D, n); }
+SIMD_WRAP_U(reflect_u_simd, op_reflect)
+SIMD_WRAP_U(geometric_u_simd, op_geometric)
+SIMD_WRAP_U(harmonic_u_simd, op_harmonic)
+
+#else
+ALIAS(darken_u4, darken_scalar) ALIAS(xor_u4, xor_scalar) ALIAS(diff_u4, diff_scalar) ALIAS(avg_u4, avg_scalar)
+static inline void reflect_u_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { reflect_scalar(A, B, D, n); }
+static inline void geometric_u_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { geometric_scalar(A, B, D, n); }
+static inline void harmonic_u_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { harmonic_scalar(A, B, D, n); }
+#endif

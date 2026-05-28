@@ -150,10 +150,13 @@ modes — swap the table, same kernel.
 
 ### Optimizations tried
 
-- **Unroll the cheap ops 4× → ~4–5×** (`add` ~7 → ~30 Gi/s, bit-exact). The 16-wide loop is memory-level-
-  parallelism limited, not L1-bandwidth limited; four independent load/store streams expose the real ceiling.
+- **Unroll the cheap ops 4× → ~4× across all of Tier-1** (`add`/`darken`/`xor`/`diff`/`average` all
+  ~7 → ~30 Gi/s, bit-exact). The 16-wide loop is memory-level-parallelism limited, not L1-bandwidth limited;
+  four independent load/store streams expose the real ceiling.
+- **Unrolling the Tier-3 float modes barely helps** (reflect/harmonic ~1.1×, geometric flat) — the
+  divide/sqrt *unit* is throughput-bound, so ~1.5–1.9 Gi/s is near its ceiling.
 - **Reciprocal / rsqrt estimate + Newton *backfires* on Apple Silicon** — native `vdivq`/`vsqrtq` win
-  (reflect 1.56 → 1.32, geometric 1.99 → 1.33 Gi/s). The classic embedded-ARM trick is a pessimization here.
+  (reflect 1.43 → 1.42, geometric 1.90 → 1.32 Gi/s). The classic embedded-ARM trick is a pessimization here.
 - **Unrolling the Frank polynomial is flat** (~0.76 → 0.73 Gi/s) — already enough ILP, compute-bound.
 
 ## Sample images & license

@@ -107,6 +107,15 @@ BENCHMARK_TEMPLATE(Run, rms_fast_simd)->Name("rms/simd-rsqrt");
 BENCHMARK_TEMPLATE(Run, add_simd_u4)->Name("add/simd-unroll4");
 BENCHMARK_TEMPLATE(Run, frank_poly_u)->Name("frank/NEON-poly-unroll16");
 
+// across-the-board unroll: more Tier-1 ops, and Tier-3 float with native div/sqrt
+BENCHMARK_TEMPLATE(Run, darken_u4)->Name("darken/simd-unroll4");
+BENCHMARK_TEMPLATE(Run, xor_u4)->Name("xor/simd-unroll4");
+BENCHMARK_TEMPLATE(Run, diff_u4)->Name("diff/simd-unroll4");
+BENCHMARK_TEMPLATE(Run, avg_u4)->Name("average/simd-unroll4");
+BENCHMARK_TEMPLATE(Run, reflect_u_simd)->Name("reflect/simd-unroll16");
+BENCHMARK_TEMPLATE(Run, geometric_u_simd)->Name("geometric/simd-unroll16");
+BENCHMARK_TEMPLATE(Run, harmonic_u_simd)->Name("harmonic/simd-unroll16");
+
 
 // ============================================================================
 //  main: verify correctness, then run
@@ -139,6 +148,9 @@ int main(int argc, char** argv) {
     verify(rms_scalar, rms_fast_simd, "rms-rsqrt");
     verify(frank_scalar, frank_poly_u, "frank-poly-u");
     verify(add_scalar, add_simd_u4, "add-unroll4");
+    verify(darken_scalar, darken_u4, "darken-u4");
+    verify(reflect_scalar, reflect_u_simd, "reflect-u16");
+    verify(geometric_scalar, geometric_u_simd, "geom-u16");
     std::printf("---\n");
 
     benchmark::Initialize(&argc, argv);
