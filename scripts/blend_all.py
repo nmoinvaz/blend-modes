@@ -146,6 +146,8 @@ def _modc(a, b):
     return np.where(a <= 0, 0.0, np.where(q % 2 == 0, m, a2 - m))
 MODES["additivesub*NEW"] = ("A − √B",          G(lambda a, b: a - np.sqrt(b)))
 MODES["arctan*NEW"]      = ("(2/π)·atan(B/A)",  G(lambda a, b: (2/np.pi) * np.arctan(b / np.maximum(a, 1e-9))))
+MODES["splay*NEW"]       = ("255 − arctan(255−A,255−B)", _D("arctan*NEW"))
+MODES["sine~HYPO"]       = ("sin²(π(A+B)/4)",  G(lambda a, b: np.sin(np.pi * (a + b) / 4) ** 2))
 MODES["gammadark*NEW"]   = ("B^(1/A)",          G(lambda a, b: np.power(np.maximum(b,1e-9), 1/np.maximum(a,1e-9))))
 MODES["gammalight*NEW"]  = ("B^A",              G(lambda a, b: np.power(np.maximum(b,0), a)))
 MODES["gammaillum*NEW"]  = ("1−(1−A)^(1/(1−B))", G(lambda a, b: 1 - np.power(np.maximum(1-a,0), 1/np.maximum(1-b,1e-9))))
@@ -187,12 +189,12 @@ FAMILY = {
     "pinlight": "contrast", "hardmix": "contrast", "glowlight": "contrast",
     "and": "bitwise", "or": "bitwise", "xor": "bitwise",
     "nand": "bitwise", "nor": "bitwise", "xnor": "bitwise",
-    "multiply128": "multiplicative", "softdifference": "difference", "interpolate": "power-mean",
+    "multiply128": "multiplicative", "softdifference": "difference", "interpolate": "trig",
     "hardoverlay": "contrast", "hamxor": "difference", "dodge3": "dodge/burn", "burn3": "dodge/burn",
     "yagerprod": "multiplicative", "yagersum": "multiplicative", "screen128": "multiplicative",
     "embers": "difference", "rift": "difference",
     "veil": "contrast", "afterglow": "contrast",
-    "additivesub": "difference", "arctan": "difference",
+    "additivesub": "difference", "arctan": "trig", "splay": "trig", "sine": "trig",
     "modulo": "modulo", "modcont": "modulo", "divmodulo": "modulo",
     "gammadark": "gamma", "gammalight": "gamma", "gammaillum": "gamma",
     "pnorma": "multiplicative", "pnormb": "multiplicative",
@@ -240,6 +242,7 @@ ALIASES = {
  "softdifference": ("", "contrast-stretched |a−b|"), "hamxor": ("", "a+b−2·hamacher(a,b)"),
  "dodge3": ("", "b³/(1−a)"), "burn3": ("", "1−(1−b)³/a"),
  "additivesub": ("Additive Subtractive", "a−√b"), "arctan": ("Arcus Tangent", "(2/π)atan(b/a)"),
+ "splay": ("", "dual of arcus tangent"), "sine": ("", "sin²(π(a+b)/4), self-dual"),
  "modulo": ("Modulo", "b mod a"), "modcont": ("Modulo Continuous", "reflected b mod a"),
  "divmodulo": ("Divisive Modulo", "(b/a) mod 1"),
  "gammadark": ("Gamma Dark", "b^(1/a)"), "gammalight": ("Gamma Light", "b^a"),
@@ -302,16 +305,16 @@ fname, fmath = font(20), font(14)
 # modes are shown in symmetric (dual) pairs, except POWER-MEAN which IS the monotone
 # chain and is drawn as an ordered strip (darken -> lighten).
 PM_CHAIN = ["darken", "harmonic", "geometric", "logarithmic*NEW", "heronian*NEW",
-            "identric*NEW", "average", "interpolate", "rms~HYPO", "contraharm~HYPO",
+            "identric*NEW", "average", "rms~HYPO", "contraharm~HYPO",
             "centroidal*NEW", "sheen*NEW", "bloom*NEW", "lighten"]
 SECTIONS = [
-    ["POWER-MEAN", "the monotone chain darken -> lighten;  M_p = ((A^p+B^p)/2)^(1/p) and other means",
+    ["POWER-MEAN", "monotone chain darken -> lighten;  M_p = ((A^p + B^p)/2)^(1/p)",
         [], PM_CHAIN],
-    ["MULTIPLICATIVE", "product-based: t-norm/conorm pairs (Frank, Einstein, Hamacher, Yager), mid-pivot multiply128, P-Norm screens",
+    ["MULTIPLICATIVE", "product-based: t-norm / conorm pairs (Frank, Einstein, Hamacher, Yager)",
         [("multiply", "screen"), ("einprod*NEW", "einsum*NEW"), ("hamprod*NEW", "hamsum*NEW"),
          ("yagerprod*NEW", "yagersum*NEW"), ("multiply128", "screen128*NEW")],
         ["pnorma*NEW", "pnormb*NEW"]],
-    ["DODGE / BURN", "B^k / (255-A) and complement;  k=1 color, k=2 quadratic, k=3 cubic, plus Krita Easy",
+    ["DODGE / BURN", "B^k / (255-A) and complement;  k = 1 color, 2 quadratic, 3 cubic",
         [("burn", "dodge"), ("divide", "quench*NEW"), ("burn3~HYPO", "dodge3~HYPO"), ("easyburn*NEW", "easydodge*NEW")], []],
     ["GAMMA", "power-curve modes (Krita):  B^A and B^(1/A) families",
         [], ["gammadark*NEW", "gammalight*NEW", "gammaillum*NEW"]],
@@ -320,13 +323,15 @@ SECTIONS = [
     ["LINEAR / AFFINE", "clamped  a*A + b*B + c   (strictly affine; no product term)",
         [("subtract", "lift*NEW"), ("addition", "linearburn*NEW"), ("bleach", "stain")],
         ["grainextract", "grainmerge"]],
-    ["DIFFERENCE & BITWISE", "symmetric difference  A+B-2*AND(A,B):  AND=min->difference, product->exclusion, bitwise->xor   (and=conjunction, or=disjunction)",
+    ["DIFFERENCE & BITWISE", "symmetric difference  A + B - 2*AND(A,B);  AND = min / product / bitwise",
         [("difference", "phoenix"), ("negation", "extremity"), ("exclusion", "inclusion*NEW"),
          ("xor", "xnor*NEW"), ("and", "or"), ("nand*NEW", "nor*NEW"),
          ("softdifference", "embers*NEW"), ("hamxor~HYPO", "rift~HYPO")],
-        ["additivesub*NEW", "arctan*NEW"]],
-    ["MODULO", "Krita wrap-around: B mod A, its reflected variant, and divisive; abstract banding",
+        ["additivesub*NEW"]],
+    ["MODULO", "wrap-around:  B mod A, reflected, and divisive",
         [], ["modulo*NEW", "modcont*NEW", "divmodulo*NEW"]],
+    ["TRIGONOMETRIC", "cosine, sine & arc-tangent modes  (penumbra C/D are also arc-tangent)",
+        [("arctan*NEW", "splay*NEW")], ["interpolate", "sine~HYPO"]],
     ["QUADRATIC", "A^2 / (255-B) and its dual / swap partners",
         [("reflect", "freeze"), ("glow", "heat")], []],
     ["CONTRAST", "fuse(darkening op below 128, lightening op above 128)",
@@ -362,8 +367,8 @@ PB = np.asarray(Image.open("b.jpg").convert("RGB").resize((240, 240)), float)   
 
 main, strip_w, titleh, caph = 240, 32, 28, 64
 cell = main                                 # main image full width; refs live in the caption
-gapx, gapy, margin, sd_gap, headh, fam_gap = 26, 18, 16, 8, 62, 26
-fname, fmath, ftitle, fhint, fxref = font(18), font(11), font(22), font(15), font(9)
+gapx, gapy, margin, sd_gap, headh, fam_gap = 26, 18, 16, 8, 74, 26
+fname, fmath, ftitle, fhint, fxref = font(18), font(11), font(24), font(18), font(9)
 cols_b, sd_cols = 2, 4
 block_w, block_h, sd_h = 2 * cell, titleh + main + caph, main + caph
 YELLOW, LAVENDER = (255, 244, 200), (232, 224, 255)
@@ -418,7 +423,7 @@ y += titleh + main + caph + fam_gap
 for famname, hint, pairs, singles in SECTIONS:
     d.rectangle([margin - 3, y, W - margin + 3, y + headh - 6], fill=(40, 55, 75))
     d.text((margin + 8, y + 8), famname, fill=(255, 255, 255), font=ftitle)
-    d.text((margin + 8, y + 34), hint, fill=(205, 214, 228), font=fhint)
+    d.text((margin + 8, y + 42), hint, fill=(205, 214, 228), font=fhint)
     y += headh
     for i, (l, r) in enumerate(pairs):
         row, col = divmod(i, cols_b)
