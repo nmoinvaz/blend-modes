@@ -158,6 +158,11 @@ contrast fuses + difference/exclusion as one parametric formula):
 Because `s` is constant per image, one 64 KB LUT (or one polynomial kernel) covers the *entire* Frank
 family and the trig modes — swap the table, same kernel.
 
+**Tier-3 — float-reciprocal modes hand-vectorized** (where there's the least prior art): `reflect`,
+`glow`, `heat`, `freeze` and the means (`geometric`, `harmonic`, `rms`, `contraharmonic`) as 4-wide NEON
+float give **~2.7–3.1×** over scalar (~0.5–0.7 → ~1.4–1.9 Gi/s), bit-exact — and unlike the LUT they
+work for **float/HDR**.
+
 ## Sample images & license
 
 The landscape/dog inputs (`scripts/a.jpg`, `scripts/b.jpg`) are from [Lorem Picsum](https://picsum.photos)

@@ -67,6 +67,16 @@ BENCHMARK_TEMPLATE(Run, arctan_scalar)->Name("arctan/scalar");
 BENCHMARK_TEMPLATE(Run, frank_lut)->Name("frank/LUT-apply (gather)");
 BENCHMARK_TEMPLATE(Run, frank_poly)->Name("frank/NEON-poly (no gather)");
 
+// Tier-3 quadratic (float reciprocal) + means (sqrt/recip) -- 4-wide NEON float
+PAIR("reflect",  reflect_scalar,  reflect_simd)
+PAIR("glow",     glow_scalar,     glow_simd)
+PAIR("heat",     heat_scalar,     heat_simd)
+PAIR("freeze",   freeze_scalar,   freeze_simd)
+PAIR("geometric",geometric_scalar,geometric_simd)
+PAIR("harmonic", harmonic_scalar, harmonic_simd)
+PAIR("rms",      rms_scalar,      rms_simd)
+PAIR("contra",   contra_scalar,   contra_simd)
+
 int main(int argc, char** argv) {
     int bad = 0;
     bad += verify(darken_scalar, darken_simd, "darken");
@@ -77,6 +87,10 @@ int main(int argc, char** argv) {
     // Tier-4: verify each mode's LUT matches its scalar compute (within rounding)
     frank_build_lut(FRANK_S);   bad += verify(frank_scalar,  frank_lut, "frank");
     verify(frank_scalar, frank_poly, "frank-poly");   // gather-free polynomial path
+    verify(reflect_scalar, reflect_simd, "reflect");
+    verify(geometric_scalar, geometric_simd, "geometric");
+    verify(harmonic_scalar, harmonic_simd, "harmonic");
+    verify(contra_scalar, contra_simd, "contra");
     build_lut_g(g_interp);      bad += verify(interp_scalar, frank_lut, "interpolate");
     build_lut_g(g_sine);        bad += verify(sine_scalar,   frank_lut, "sine");
     build_lut_g(g_arctan);      bad += verify(arctan_scalar, frank_lut, "arctan");

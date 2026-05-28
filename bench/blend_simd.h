@@ -145,3 +145,54 @@ static inline void frank_poly(const uint8_t* A, const uint8_t* B, uint8_t* D, si
 #else
 static inline void frank_poly(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { frank_scalar(A, B, D, n); }
 #endif
+
+// ===== Tier-3/4 hand-vectorized: quadratic (float-reciprocal) + means (sqrt/recip) =====
+// Less prior art than the cheap ops; these need per-lane divide/sqrt -> 4-wide NEON float.
+#define SCAL_F(NAME, EXPR) \
+static inline void NAME##_scalar(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { \
+    for (size_t i = 0; i < n; ++i) { float a = A[i]*(1.f/255.f), b = B[i]*(1.f/255.f); D[i] = clamp8(EXPR); } }
+SCAL_F(reflect,   fminf(1.f, a*a / fmaxf(1.f-b, 1e-6f)))
+SCAL_F(glow,      fminf(1.f, b*b / fmaxf(1.f-a, 1e-6f)))
+SCAL_F(heat,      1.f - fminf(1.f, (1.f-b)*(1.f-b) / fmaxf(a, 1e-6f)))
+SCAL_F(freeze,    1.f - fminf(1.f, (1.f-a)*(1.f-a) / fmaxf(b, 1e-6f)))
+SCAL_F(geometric, sqrtf(a*b))
+SCAL_F(harmonic,  2.f*a*b / fmaxf(a+b, 1e-6f))
+SCAL_F(rms,       sqrtf((a*a + b*b) * 0.5f))
+SCAL_F(contra,    (a*a + b*b) / fmaxf(a+b, 1e-6f))
+
+#if defined(__ARM_NEON)
+#define ONE vdupq_n_f32(1.f)
+#define EPS vdupq_n_f32(1e-6f)
+static inline float32x4_t op_reflect(float32x4_t a, float32x4_t b)   { return vminq_f32(ONE, vdivq_f32(vmulq_f32(a,a), vmaxq_f32(vsubq_f32(ONE,b),EPS))); }
+static inline float32x4_t op_glow(float32x4_t a, float32x4_t b)      { return vminq_f32(ONE, vdivq_f32(vmulq_f32(b,b), vmaxq_f32(vsubq_f32(ONE,a),EPS))); }
+static inline float32x4_t op_heat(float32x4_t a, float32x4_t b)      { float32x4_t t=vsubq_f32(ONE,b); return vsubq_f32(ONE, vminq_f32(ONE, vdivq_f32(vmulq_f32(t,t), vmaxq_f32(a,EPS)))); }
+static inline float32x4_t op_freeze(float32x4_t a, float32x4_t b)    { float32x4_t t=vsubq_f32(ONE,a); return vsubq_f32(ONE, vminq_f32(ONE, vdivq_f32(vmulq_f32(t,t), vmaxq_f32(b,EPS)))); }
+static inline float32x4_t op_geometric(float32x4_t a, float32x4_t b) { return vsqrtq_f32(vmulq_f32(a,b)); }
+static inline float32x4_t op_harmonic(float32x4_t a, float32x4_t b)  { return vdivq_f32(vmulq_f32(vdupq_n_f32(2.f), vmulq_f32(a,b)), vmaxq_f32(vaddq_f32(a,b),EPS)); }
+static inline float32x4_t op_rms(float32x4_t a, float32x4_t b)       { return vsqrtq_f32(vmulq_f32(vaddq_f32(vmulq_f32(a,a),vmulq_f32(b,b)), vdupq_n_f32(0.5f))); }
+static inline float32x4_t op_contra(float32x4_t a, float32x4_t b)    { return vdivq_f32(vaddq_f32(vmulq_f32(a,a),vmulq_f32(b,b)), vmaxq_f32(vaddq_f32(a,b),EPS)); }
+
+template <float32x4_t (*OP)(float32x4_t, float32x4_t)>
+static inline void simd_f(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) {
+    const float32x4_t inv = vdupq_n_f32(1.f/255.f), v255 = vdupq_n_f32(255.f), z = vdupq_n_f32(0.f);
+    size_t i = 0, m = n & ~size_t(7);                                   // requires multiples of 8 (N is)
+    for (; i < m; i += 8) {
+        uint16x8_t wa = vmovl_u8(vld1_u8(A+i)), wb = vmovl_u8(vld1_u8(B+i));
+        float32x4_t al = vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(wa))), inv);
+        float32x4_t bl = vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(wb))), inv);
+        float32x4_t ah = vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_high_u16(wa))), inv);
+        float32x4_t bh = vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_high_u16(wb))), inv);
+        float32x4_t rl = vminq_f32(vmaxq_f32(vmulq_f32(OP(al,bl), v255), z), v255);
+        float32x4_t rh = vminq_f32(vmaxq_f32(vmulq_f32(OP(ah,bh), v255), z), v255);
+        uint16x4_t lo = vmovn_u32(vcvtnq_u32_f32(rl)), hi = vmovn_u32(vcvtnq_u32_f32(rh));
+        vst1_u8(D+i, vmovn_u16(vcombine_u16(lo, hi)));
+    }
+}
+#define SIMD_WRAP(NAME, OP) static inline void NAME##_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { simd_f<OP>(A,B,D,n); }
+SIMD_WRAP(reflect, op_reflect) SIMD_WRAP(glow, op_glow) SIMD_WRAP(heat, op_heat) SIMD_WRAP(freeze, op_freeze)
+SIMD_WRAP(geometric, op_geometric) SIMD_WRAP(harmonic, op_harmonic) SIMD_WRAP(rms, op_rms) SIMD_WRAP(contra, op_contra)
+#else
+#define SIMD_WRAP(NAME, OP) static inline void NAME##_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { NAME##_scalar(A,B,D,n); }
+SIMD_WRAP(reflect,) SIMD_WRAP(glow,) SIMD_WRAP(heat,) SIMD_WRAP(freeze,)
+SIMD_WRAP(geometric,) SIMD_WRAP(harmonic,) SIMD_WRAP(rms,) SIMD_WRAP(contra,)
+#endif
