@@ -121,7 +121,7 @@ L1-resident, scalar baseline with auto-vectorization off; every SIMD path bit-ex
 cmake -S bench -B bench/build && cmake --build bench/build && ./bench/build/blend_bench
 ```
 
-**Tier 1/2 — scalar vs hand-NEON** (all hit the ~6.7 Gi/s bandwidth ceiling once vectorized):
+**Tier 1/2 — scalar vs hand-NEON** (16-wide ~7 Gi/s; but see *Optimizations* — that's not the real ceiling):
 
 | mode | scalar | NEON | speedup |
 |---|---|---|---|
@@ -147,6 +147,14 @@ contrast fuses + difference/exclusion):
 
 `s` is constant per image, so one LUT (or one polynomial kernel) covers the whole Frank family and the trig
 modes — swap the table, same kernel.
+
+### Optimizations tried
+
+- **Unroll the cheap ops 4× → ~4–5×** (`add` ~7 → ~30 Gi/s, bit-exact). The 16-wide loop is memory-level-
+  parallelism limited, not L1-bandwidth limited; four independent load/store streams expose the real ceiling.
+- **Reciprocal / rsqrt estimate + Newton *backfires* on Apple Silicon** — native `vdivq`/`vsqrtq` win
+  (reflect 1.56 → 1.32, geometric 1.99 → 1.33 Gi/s). The classic embedded-ARM trick is a pessimization here.
+- **Unrolling the Frank polynomial is flat** (~0.76 → 0.73 Gi/s) — already enough ILP, compute-bound.
 
 ## Sample images & license
 

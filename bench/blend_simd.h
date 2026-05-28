@@ -300,3 +300,67 @@ SIMD_WRAP(rms, op_rms)             SIMD_WRAP(contra, op_contra)
 SIMD_WRAP(reflect,)   SIMD_WRAP(glow,)     SIMD_WRAP(heat,)   SIMD_WRAP(freeze,)
 SIMD_WRAP(geometric,) SIMD_WRAP(harmonic,) SIMD_WRAP(rms,)    SIMD_WRAP(contra,)
 #endif
+
+// ============================================================================
+//  Optimization experiments: fast reciprocal/rsqrt (Tier 3) + unrolling
+// ============================================================================
+#if defined(__ARM_NEON)
+
+// reciprocal via estimate + 2 Newton steps (pipelined FMAs, ~23-bit) - replaces vdivq
+static inline float32x4_t recip2(float32x4_t y) {
+    float32x4_t e = vrecpeq_f32(y);
+    e = vmulq_f32(e, vrecpsq_f32(y, e));
+    e = vmulq_f32(e, vrecpsq_f32(y, e));
+    return e;
+}
+// rsqrt via estimate + 2 Newton steps; sqrt(x) = x * rsqrt(x)
+static inline float32x4_t rsqrt2(float32x4_t x) {
+    float32x4_t e = vrsqrteq_f32(x);
+    e = vmulq_f32(e, vrsqrtsq_f32(vmulq_f32(x, e), e));
+    e = vmulq_f32(e, vrsqrtsq_f32(vmulq_f32(x, e), e));
+    return e;
+}
+static inline float32x4_t sqrt_fast(float32x4_t x) { return vmulq_f32(x, rsqrt2(vmaxq_f32(x, vdupq_n_f32(1e-12f)))); }
+
+// Tier-3 ops with the divide/sqrt replaced by the pipelined estimates
+static inline float32x4_t op_reflect_f(float32x4_t a, float32x4_t b)   { return vminq_f32(ONE, vmulq_f32(vmulq_f32(a, a), recip2(vmaxq_f32(vsubq_f32(ONE, b), EPS)))); }
+static inline float32x4_t op_harmonic_f(float32x4_t a, float32x4_t b)  { return vmulq_f32(vmulq_f32(vdupq_n_f32(2.f), vmulq_f32(a, b)), recip2(vmaxq_f32(vaddq_f32(a, b), EPS))); }
+static inline float32x4_t op_geometric_f(float32x4_t a, float32x4_t b) { return sqrt_fast(vmulq_f32(a, b)); }
+static inline float32x4_t op_rms_f(float32x4_t a, float32x4_t b)       { return sqrt_fast(vmulq_f32(vaddq_f32(vmulq_f32(a, a), vmulq_f32(b, b)), vdupq_n_f32(0.5f))); }
+
+SIMD_WRAP(reflect_fast, op_reflect_f)     SIMD_WRAP(harmonic_fast, op_harmonic_f)
+SIMD_WRAP(geometric_fast, op_geometric_f) SIMD_WRAP(rms_fast, op_rms_f)
+
+// Tier-1 add unrolled 4x (64 bytes/iter) - tests whether bandwidth-bound ops gain
+static inline void add_simd_u4(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) {
+    size_t i = 0, m = n & ~size_t(63);
+    for (; i < m; i += 64) {
+        vst1q_u8(D + i,      vqaddq_u8(vld1q_u8(A + i),      vld1q_u8(B + i)));
+        vst1q_u8(D + i + 16, vqaddq_u8(vld1q_u8(A + i + 16), vld1q_u8(B + i + 16)));
+        vst1q_u8(D + i + 32, vqaddq_u8(vld1q_u8(A + i + 32), vld1q_u8(B + i + 32)));
+        vst1q_u8(D + i + 48, vqaddq_u8(vld1q_u8(A + i + 48), vld1q_u8(B + i + 48)));
+    }
+    add_scalar(A + i, B + i, D + i, n - i);
+}
+
+// Tier-4 frank polynomial unrolled to 16 pixels/iter (4 independent frank4 chains)
+static inline void frank_poly_u(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) {
+    size_t i = 0, m = n & ~size_t(15);
+    for (; i < m; i += 16) {
+        uint8x16_t va = vld1q_u8(A + i), vb = vld1q_u8(B + i);
+        uint16x8_t al = vmovl_u8(vget_low_u8(va)), ah = vmovl_u8(vget_high_u8(va));
+        uint16x8_t bl = vmovl_u8(vget_low_u8(vb)), bh = vmovl_u8(vget_high_u8(vb));
+        uint16x4_t r0 = frank4(vget_low_u16(al),  vget_low_u16(bl));
+        uint16x4_t r1 = frank4(vget_high_u16(al), vget_high_u16(bl));
+        uint16x4_t r2 = frank4(vget_low_u16(ah),  vget_low_u16(bh));
+        uint16x4_t r3 = frank4(vget_high_u16(ah), vget_high_u16(bh));
+        vst1q_u8(D + i, vcombine_u8(vmovn_u16(vcombine_u16(r0, r1)), vmovn_u16(vcombine_u16(r2, r3))));
+    }
+    frank_scalar(A + i, B + i, D + i, n - i);
+}
+
+#else
+SIMD_WRAP(reflect_fast,)   SIMD_WRAP(harmonic_fast,) SIMD_WRAP(geometric_fast,) SIMD_WRAP(rms_fast,)
+static inline void add_simd_u4(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { add_scalar(A, B, D, n); }
+static inline void frank_poly_u(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { frank_scalar(A, B, D, n); }
+#endif

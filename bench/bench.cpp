@@ -99,6 +99,14 @@ BENCHMARK_TEMPLATE(Run, arctan_scalar)->Name("arctan/scalar");
 BENCHMARK_TEMPLATE(Run, frank_lut)->Name("frank/LUT-apply (gather)");
 BENCHMARK_TEMPLATE(Run, frank_poly)->Name("frank/NEON-poly (no gather)");
 
+// Optimization experiments: fast reciprocal/rsqrt (Tier 3) and unrolling
+BENCHMARK_TEMPLATE(Run, reflect_fast_simd)->Name("reflect/simd-recip");
+BENCHMARK_TEMPLATE(Run, harmonic_fast_simd)->Name("harmonic/simd-recip");
+BENCHMARK_TEMPLATE(Run, geometric_fast_simd)->Name("geometric/simd-rsqrt");
+BENCHMARK_TEMPLATE(Run, rms_fast_simd)->Name("rms/simd-rsqrt");
+BENCHMARK_TEMPLATE(Run, add_simd_u4)->Name("add/simd-unroll4");
+BENCHMARK_TEMPLATE(Run, frank_poly_u)->Name("frank/NEON-poly-unroll16");
+
 
 // ============================================================================
 //  main: verify correctness, then run
@@ -123,6 +131,14 @@ int main(int argc, char** argv) {
     build_lut_g(g_sine);       verify(sine_scalar,   frank_lut,  "sine");
     build_lut_g(g_arctan);     verify(arctan_scalar, frank_lut,  "arctan");
     frank_build_lut(FRANK_S);  // leave a valid table for the LUT-apply benchmark
+
+    // optimization experiments vs their scalar baselines
+    verify(reflect_scalar, reflect_fast_simd, "reflect-recip");
+    verify(harmonic_scalar, harmonic_fast_simd, "harmonic-recip");
+    verify(geometric_scalar, geometric_fast_simd, "geom-rsqrt");
+    verify(rms_scalar, rms_fast_simd, "rms-rsqrt");
+    verify(frank_scalar, frank_poly_u, "frank-poly-u");
+    verify(add_scalar, add_simd_u4, "add-unroll4");
     std::printf("---\n");
 
     benchmark::Initialize(&argc, argv);
