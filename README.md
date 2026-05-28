@@ -122,6 +122,42 @@ pip install -r requirements.txt
 cd scripts && python3 blend_all.py     # writes blend_atlas.png
 ```
 
+## Benchmarks (SIMD)
+
+How well each family maps to SIMD intrinsics falls straight out of the taxonomy: the *linear /
+min-max / bitwise* families are ~free (one instruction), *multiplicative* needs a multiply + `÷255`
+trick, *dodge-burn / quadratic* need a reciprocal, and *gamma / trig / exotic-mean* are transcendental.
+[`bench/`](bench/) measures this with **Google Benchmark + CMake** (Apple Silicon, NEON; median of 5,
+L1-resident, scalar baseline with auto-vectorization disabled; every SIMD path verified bit-exact, the
+polynomial within 1 level).
+
+```sh
+cmake -S bench -B bench/build && cmake --build bench/build && ./bench/build/blend_bench
+```
+
+**Tier-1/2 — scalar vs hand-NEON** (all hit the ~6.7 Gi/s load/store-bandwidth ceiling once vectorized):
+
+| mode | scalar | NEON | speedup |
+|---|---|---|---|
+| darken / lighten / subtract / average / xor / diff | ~0.85 Gi/s | ~6.8 Gi/s | **~8×** |
+| add (saturating) | 1.43 Gi/s | 6.75 Gi/s | 4.7× |
+| multiply, screen (`·`/`÷255`) | ~0.9–1.1 Gi/s | ~6.7 Gi/s | 6–8× |
+
+(With auto-vectorization *on*, the compiler already NEONs the trivial ops — hand-intrinsics matter most
+for saturating-add, the `÷255` modes, and Tier-4.)
+
+**Tier-4 — the Frank t-norm three ways** (it covers multiply/screen/min/max/linearburn/addition +
+contrast fuses + difference/exclusion as one parametric formula):
+
+| Frank `s=10` | throughput | needs |
+|---|---|---|
+| scalar (`pow,pow,log,log`) | 104 Mi/s | libm |
+| **NEON polynomial (gather-free)** | **700 Mi/s** (~6.7×) | just FMAs; works for float/HDR |
+| 256×256 LUT (indexed loads) | 1.4 Gi/s (~13×) | 64 KB table; 8-bit only |
+
+Because `s` is constant per image, one 64 KB LUT (or one polynomial kernel) covers the *entire* Frank
+family and the trig modes — swap the table, same kernel.
+
 ## Sample images & license
 
 The landscape/dog inputs (`scripts/a.jpg`, `scripts/b.jpg`) are from [Lorem Picsum](https://picsum.photos)
