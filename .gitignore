@@ -1,0 +1,6 @@
+# generated outputs (committed copies live in images/)
+scripts/*.png
+scripts/blend_atlas.png
+__pycache__/
+.venv/
+*.pyc
