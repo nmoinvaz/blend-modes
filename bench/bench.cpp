@@ -96,6 +96,7 @@ BENCHMARK_TEMPLATE(Run, frank_scalar)->Name("frank/scalar");
 BENCHMARK_TEMPLATE(Run, interp_scalar)->Name("interpolate/scalar");
 BENCHMARK_TEMPLATE(Run, sine_scalar)->Name("sine/scalar");
 BENCHMARK_TEMPLATE(Run, arctan_scalar)->Name("arctan/scalar");
+BENCHMARK_TEMPLATE(Run, arctan_simd)->Name("arctan/simd-poly");
 BENCHMARK_TEMPLATE(Run, frank_lut)->Name("frank/LUT-apply (gather)");
 BENCHMARK_TEMPLATE(Run, frank_poly)->Name("frank/NEON-poly (no gather)");
 
@@ -139,6 +140,7 @@ int main(int argc, char** argv) {
     build_lut_g(g_interp);     verify(interp_scalar, frank_lut,  "interpolate");
     build_lut_g(g_sine);       verify(sine_scalar,   frank_lut,  "sine");
     build_lut_g(g_arctan);     verify(arctan_scalar, frank_lut,  "arctan");
+    verify(arctan_scalar, arctan_simd, "arctan-poly");
     frank_build_lut(FRANK_S);  // leave a valid table for the LUT-apply benchmark
 
     // optimization experiments vs their scalar baselines

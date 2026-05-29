@@ -148,6 +148,10 @@ contrast fuses + difference/exclusion):
 `s` is constant per image, so one LUT (or one polynomial kernel) covers the whole Frank family and the trig
 modes — swap the table, same kernel.
 
+**Trig vectorizes too** — the best transcendental case: a degree-7 `atan` polynomial + `atan2` range
+reduction (`min/max` ratio into `[0,1]`, then a branchless `vbslq` select for the `b>a` half-plane) gives
+**`arctan` at 1.1 Gi/s, ~17× over scalar `atanf`** — bit-exact and gather-free.
+
 ### Optimizations tried
 
 - **Unroll the cheap ops 4× → ~4× across all of Tier-1** (`add`/`darken`/`xor`/`diff`/`average` all

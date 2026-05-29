@@ -419,3 +419,38 @@ static inline void reflect_u_simd(const uint8_t* A, const uint8_t* B, uint8_t* D
 static inline void geometric_u_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { geometric_scalar(A, B, D, n); }
 static inline void harmonic_u_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { harmonic_scalar(A, B, D, n); }
 #endif
+
+// ---- arctan mode in NEON: polynomial atan(t) on [0,1] + atan2 range reduction ----
+#if defined(__ARM_NEON)
+static const float CT[8] = {5.29361165e-02f, -2.23770633e-01f, 3.17735837e-01f, -3.21706056e-02f,
+                            -3.29175728e-01f, -1.47010867e-04f, 9.99991151e-01f, 3.00035562e-07f};
+
+static inline uint16x4_t arctan4(uint16x4_t ai, uint16x4_t bi) {
+    const float32x4_t inv = vdupq_n_f32(1.f / 255.f), eps = vdupq_n_f32(1e-9f);
+    const float32x4_t one = vdupq_n_f32(1.f), scale = vdupq_n_f32(2.f / (float)M_PI);
+
+    float32x4_t a = vmulq_f32(vcvtq_f32_u32(vmovl_u16(ai)), inv);
+    float32x4_t b = vmulq_f32(vcvtq_f32_u32(vmovl_u16(bi)), inv);
+
+    // reduce the ratio to [0,1]: t = min/max; atan2(b,a) = atan(t) or pi/2 - atan(t)
+    float32x4_t t  = vdivq_f32(vminq_f32(a, b), vmaxq_f32(vmaxq_f32(a, b), eps));
+    float32x4_t ap = vmulq_f32(scale, horner(CT, 7, t));          // (2/pi)*atan(t) in [0, 0.5]
+    float32x4_t r  = vbslq_f32(vcgtq_f32(b, a), vsubq_f32(one, ap), ap);   // b>a ? 1-ap : ap
+
+    r = vminq_f32(vmaxq_f32(vmulq_f32(r, vdupq_n_f32(255.f)), vdupq_n_f32(0.f)), vdupq_n_f32(255.f));
+    return vmovn_u32(vcvtnq_u32_f32(r));
+}
+
+static inline void arctan_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) {
+    size_t i = 0, m = n & ~size_t(7);
+    for (; i < m; i += 8) {
+        uint16x8_t wa = vmovl_u8(vld1_u8(A + i)), wb = vmovl_u8(vld1_u8(B + i));
+        uint16x4_t lo = arctan4(vget_low_u16(wa),  vget_low_u16(wb));
+        uint16x4_t hi = arctan4(vget_high_u16(wa), vget_high_u16(wb));
+        vst1_u8(D + i, vmovn_u16(vcombine_u16(lo, hi)));
+    }
+    arctan_scalar(A + i, B + i, D + i, n - i);
+}
+#else
+static inline void arctan_simd(const uint8_t* A, const uint8_t* B, uint8_t* D, size_t n) { arctan_scalar(A, B, D, n); }
+#endif
