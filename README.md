@@ -152,6 +152,22 @@ modes — swap the table, same kernel.
 reduction (`min/max` ratio into `[0,1]`, then a branchless `vbslq` select for the `b>a` half-plane) gives
 **`arctan` at 1.1 Gi/s, ~17× over scalar `atanf`** — bit-exact and gather-free.
 
+### Full SIMD coverage (table-free)
+
+Every one of the 93 atlas modes has a genuine **elementwise NEON kernel** in
+[`bench/all_modes.h`](bench/all_modes.h) — **no lookup tables, no gather**. Float-elementwise modes
+use a shared `load→normalize→op→×255→clamp` driver (one line each); the transcendental modes
+(gamma, easy/super/soft-light, pnorm, log/identric, trig, penumbra) use NEON polynomial
+`exp2`/`log2`/`pow`/`atan`/`cos`/`sin`; bitwise use NEON logic ops; modulo (no SIMD modulo exists on
+any ISA, and it's discontinuous) runs a scalar double loop. [`bench/coverage.cpp`](bench/coverage.cpp)
+verifies all 93 against the atlas reference (`scripts/export_luts.py`): **worst error 1 level** — 39
+bit-exact, 54 within ±1 (float rounding vs the integer atlas).
+
+```sh
+python scripts/export_luts.py            # writes bench/ref_luts.bin from the atlas
+cd bench && cmake --build build --target blend_coverage && ./build/blend_coverage
+```
+
 ### Optimizations tried
 
 - **Unroll the cheap ops 4× → ~4× across all of Tier-1** (`add`/`darken`/`xor`/`diff`/`average` all
