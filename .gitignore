@@ -11,3 +11,6 @@ bench/build/
 # generated reference LUTs for coverage (regenerate: python scripts/export_luts.py)
 bench/ref_luts.bin
 bench/ref_names.txt
+comp.spv
+bench/gpu_bench
+shaders/*.spv
